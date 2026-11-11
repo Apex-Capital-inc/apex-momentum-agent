@@ -1,1 +1,1 @@
-worker: python3 controller.py
+worker: python3 wave_bot.py
