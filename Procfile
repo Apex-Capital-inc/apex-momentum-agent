@@ -1,1 +1,1 @@
-worker: python3 wave_bot.py
+worker: python3 wave_harvester.py
