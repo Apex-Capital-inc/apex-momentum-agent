@@ -18,9 +18,11 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import halt
 import wave_engine as we
 from kraken_client import Kraken, KrakenError, ASSET
 
@@ -28,6 +30,7 @@ log = logging.getLogger("wave")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 STATE_PATH = Path(os.getenv("WAVE_STATE", "/data/dh_state.json"))
+BACKUP_DIR = Path(os.getenv("WAVE_BACKUP_DIR", "/data/backups"))
 LOOP_SEC = int(os.getenv("DH_LOOP_SEC", "60"))
 DRY_RUN = os.getenv("DH_DRY_RUN", "false").lower() == "true"
 
@@ -48,6 +51,19 @@ def save(st: dict) -> None:
     tmp = STATE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(st, indent=2))
     tmp.replace(STATE_PATH)
+    snapshot(st)
+
+
+def snapshot(st: dict) -> None:
+    """One copy per UTC day. Append-only directory. Never overwritten."""
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        dest = BACKUP_DIR / f"dh_state-{day}.json"
+        if not dest.exists():
+            dest.write_text(json.dumps(st, indent=2))
+    except Exception as e:
+        log.warning("[BACKUP] snapshot failed: %s", e)
 
 
 def xrp_of(balances: dict) -> float:
@@ -236,10 +252,22 @@ def loop_once(k: Kraken, st: dict) -> None:
 
 
 def main() -> None:
+    level = halt.requested()
+    if level:
+        log.critical("[HALT] file or env set (%s) — refusing to start", level)
+        raise SystemExit(2)
     st = load()
+    if st.get("halted"):
+        log.critical("[HALT] state is halted (%s) — refusing to start", st.get("halt_level"))
+        raise SystemExit(2)
     k = Kraken()
     boot(k, st)
     while True:
+        level = halt.requested()
+        if level:
+            halt.engage(k, st, level, log)
+            save(st)
+            raise SystemExit(2)
         try:
             loop_once(k, st)
         except Exception:
