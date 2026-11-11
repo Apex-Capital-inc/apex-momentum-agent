@@ -34,7 +34,13 @@ DRY_RUN = os.getenv("DH_DRY_RUN", "false").lower() == "true"
 
 def load() -> dict:
     if not STATE_PATH.exists():
-        raise SystemExit(f"no state at {STATE_PATH} — refuse to invent a book")
+        seed_json = os.getenv("WAVE_SEED", "")
+        if seed_json:
+            log.info("[BOOT] no state file — seeding from WAVE_SEED env var")
+            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATE_PATH.write_text(seed_json)
+        else:
+            raise SystemExit(f"no state at {STATE_PATH} and no WAVE_SEED — refuse to invent a book")
     return json.loads(STATE_PATH.read_text())
 
 
